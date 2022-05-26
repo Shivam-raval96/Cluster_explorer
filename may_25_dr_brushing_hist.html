@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Onboarding Builder</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU8tT94WrHftjDbrCEXSU1oBoqyl2QvZ6jIW3" crossorigin="anonymous">
+
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+
+  <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
+
+  <script src="js/pca.min.js"></script>
+  <script src="js/papaparse.min.js"></script>
+
+  <script src=https://cdnjs.cloudflare.com/ajax/libs/mathjs/3.3.0/math.min.js></script>
+  <script src="https://cdn.jsdelivr.net/npm/danfojs@1.1.0/lib/bundle.min.js"></script>
+  <script src="https://unpkg.com/@saehrimnir/druidjs"></script>
+  <script src="https://d3js.org/d3.v4.min.js"></script>
+
+</head>
+<style>
+  body{
+    overflow: scroll;
+  }
+
+  text {
+    font-family: sans-serif;
+    fill: #000000;
+  }
+
+  table {
+    visibility: visible;
+    position: relative;
+    top: 60%;
+    left: 5%;
+    font-family: sans-serif;
+    font-size: 0.7em;
+  }
+
+  tr:nth-child(even) {
+    background-color: #d9d9d9;
+  }
+
+  .brushed {
+    fill: #ff3399;
+    stroke: #8e1b54;
+    opacity: 1.0;
+  }
+
+  .non_brushed {
+    fill: #676666;
+    opacity: 0.5;
+  }
+
+
+
+</style>
+<body>
+
+
+<div class="container" style = " top: 0px;left: 0px">
+
+  <div  style =" top: 0px;left: 0px;width: 50%">
+
+    <h3>Dataset Config</h3>
+    <p></p>
+    <label class="file">
+      <input type="file" id="in-file" accept="*.csv" aria-label="File browser example" onchange="parseAndReadCSV(event)">
+      <span class="file-custom"></span>
+    </label>
+    <p></br><h4>Selected Features</h4></p><p></p>
+    <p>
+      <label for="pca-dropdown" ></label>
+      <select id="pca-dropdown" multiple="multiple" style="width: 400px">
+        <option value="no_data">Default dataset loaded</option>
+      </select>
+    </p>
+
+  </div>
+
+  <div id="histograms" class="flex-item" style ="position: fixed; margin: 0px 0px 0px 0px; top: 3%; left:40%;width: 60%"> </div>
+
+</div>
+
+
+</br></br>
+<p><h2> Clustered View</h2></p>
+
+
+
+
+<form>
+  <b> Choose Alternative Dimensionality  Reduction Method: </b>
+
+  <select id = "myList" onchange = "plot_dr()" >
+    <option> PCA </option>
+    <option> TSNE </option>
+    <option> UMAP </option>
+    <option> FASTMAP </option>
+    <option> MDS </option>
+    <option> LDA </option>
+  </select>
+  <p>
+    <input type = "text" id = "method" size = "20" </p>
+</form>
+
+<!-- Create a div where the graph will take place -->
+<div id="my_dataviz" class="template resize-drag"></div>
+</br></br>
+<p>Highlighted Raw Data</p>
+<!--table for data of brushed elements-->
+<div id="table" >
+  <table>
+    <tr id="tablecolumn">
+    </tr>
+  </table>
+</div>
+
+
+<script>
+  document.body.style.zoom = "100%"
+  //var data = [[40,50,60],[50,70,60],[80,70,90],[50,60,80]];
+
+
+  async function doStuff(data) {
+    $(document).ready(function() {
+      $('#pca-dropdown').select2();
+    });
+
+    updatePCASettings(data)
+
+    $('#pca-dropdown').on('change.select2', handlePCAFeatureSelectionChange)
+
+  }
+
+  function updatePCASettings(dataArray) {
+    data = dataArray
+    $('#pca-dropdown').empty();
+    dataArray[0].sort().forEach(function(d, i) {
+      selected = i===0 || i===1 || i===2
+      var newOption = new Option(d, d, false, selected)
+      $('#pca-dropdown').append(newOption)
+    })
+    handlePCAFeatureSelectionChange()
+  }
+
+  function handlePCAFeatureSelectionChange(event) {
+    featName = $('#pca-dropdown').val()
+    //samplePCA.feature = featName
+    //samplePCA.updateVis()
+
+    //Scaling the data for pca
+    df_orig = new dfd.DataFrame(data.slice(1), { columns: data[0] })
+
+    // add table names
+    d3.select("#tablecolumn").html("")
+    d3.selectAll('th').html('')
+    d3.selectAll('tr').html('')
+    d3.select('#histograms').html('')
+    data[0].forEach(element => d3.select("#tablecolumn").append('th').text(element));
+
+
+    df = df_orig.loc({ columns: featName })
+
+    let scaler = new dfd.StandardScaler()
+    scaler.fit(df)
+    let df_enc = scaler.transform(df)
+
+    data2 = df_enc.$data
+    plot_dr()
+  }
+
+
+
+
+
+  // parse csv into matrix and perform the callback function when done
+  function parseData(url, callBack) {
+    Papa.parse(url, {
+      download: true,
+      dynamicTyping: true,
+      complete: function(results) {
+        callBack(results.data);
+      }
+    });
+  }
+
+
+
+  function parseAndReadCSV(event) {
+    var tmppath = URL.createObjectURL((event.target.files[0]))
+    parseData(tmppath, doStuff)
+    /*let promises = [d3.csv(tmppath)]
+
+    Promise.all(promises)
+      .then(function (data) {
+        console.log(data)
+      })*/
+  }
+
+
+
+  // set the dimensions and margins of the graph
+  var margin = {top: 10, right: 30, bottom: 30, left: 60},
+    width = 460 - margin.left - margin.right,
+    height = 450 - margin.top - margin.bottom;
+
+
+  function plot_dr() {
+
+    var mylist = document.getElementById("myList");
+    document.getElementById("method").value = mylist.options[mylist.selectedIndex].text;
+    //using the value from the form and druid js to compute DR vectors
+    DR = mylist.options[mylist.selectedIndex].text
+    eval ( "Y = new druid."+DR+"(data2).transform()")
+
+    id = [...Array(Y.length).keys()]
+
+    const zip = (a, b) => a.map((k, i) => [k, b[i]]);
+    plt = zip(Y, id)
+    // repeat of the plotting code above; sin interaction
+    d3.select("#alt_dr").remove();
+
+    var svg2 = d3.select("#my_dataviz")
+      .append("svg")
+      .attr("id","alt_dr")
+      .attr("width", width + margin.left + margin.right)
+      .attr("height", height + margin.top + margin.bottom)
+      .append("g")
+      .attr("transform",
+        "translate(" + margin.left + "," + margin.top + ")");
+    // Add X axis
+    var x = d3.scaleLinear()
+      .domain(d3.extent(d3.transpose(Y)[0]))
+      .range([ 0, width ]);
+
+    svg2.append("g")
+      .attr("transform", "translate(0," + height + ")")
+      .call(d3.zoom().on("zoom", function () {
+        svg2.attr("transform", d3.event.transform)
+      }))
+      .call(d3.axisBottom(x));
+
+    // Add Y axis
+    var y = d3.scaleLinear()
+      .domain(d3.extent(d3.transpose(Y)[1]))
+      .range([ 0, height]);
+    svg2.append("g")
+      .call(d3.axisLeft(y));
+    var circles = svg2.append('g')
+      .selectAll("dot")
+      .data(plt) // the .filter part is just to keep a few dots on the chart, not all of them
+      .enter()
+      .append("circle")
+      .attr("class", "non_brushed")
+      .attr("cx", function (d) { return x(d[0][0]); } )
+      .attr("cy", function (d) { return y(d[0][1]); } )
+      .attr("r", 7)
+      .style("opacity", 0.3)
+
+    svg2.append("g")
+      .call(brush);
+  }
+
+
+  function highlightBrushedCircles() {
+
+    if (d3.event.selection != null) {
+
+      // revert circles to initial style
+      d3.selectAll('circle').attr("class", "non_brushed");
+
+      var brush_coords = d3.brushSelection(this);
+
+      // style brushed circles
+      d3.selectAll('circle').filter(function (){
+
+        var cx = d3.select(this).attr("cx"),
+          cy = d3.select(this).attr("cy");
+
+        return isBrushed(brush_coords, cx, cy);
+      })
+        .attr("class", "brushed");
+    }
+  }
+
+  function displayTable() {
+
+    // disregard brushes w/o selections
+    // ref: http://bl.ocks.org/mbostock/6232537
+    if (!d3.event.selection) return;
+
+    // programmed clearing of brush after mouse-up
+    // ref: https://github.com/d3/d3-brush/issues/10
+    d3.select(this).call(brush.move, null);
+
+    var d_brushed =  d3.selectAll(".brushed").data();
+
+    const getColumns = (arr, indices) => arr.map(row => indices.map(i => row[i]));
+    ids = getColumns(d_brushed,[1]).flat(1); //The depth level specifying how deep a nested array structure should be flattened. Defaults to 1.
+    sub_data = df_orig.loc({rows: ids}).$data
+
+    // populate table if one or more elements is brushed
+    if (d_brushed.length > 0) {
+      clearTableRows();
+      sub_data.forEach(d_row => {populateTableRow(d_row);})
+      d3.selectAll('#histograms').html('')
+      d3.transpose(sub_data).forEach(d_row => {make_hist(d_row,margin.left,"heyyy");})
+
+    } else {
+      clearTableRows();
+    }
+  }
+
+  var brush = d3.brush()
+    .on("brush", highlightBrushedCircles)
+    .on("end", displayTable);
+
+
+
+  function clearTableRows() {
+
+    hideTableColNames();
+    d3.selectAll(".row_data").remove();
+  }
+
+  function isBrushed(brush_coords, cx, cy) {
+
+    var x0 = brush_coords[0][0],
+      x1 = brush_coords[1][0],
+      y0 = brush_coords[0][1],
+      y1 = brush_coords[1][1];
+
+    return x0 <= cx && cx <= x1 && y0 <= cy && cy <= y1;
+  }
+
+  function hideTableColNames() {
+    d3.select("table").style("visibility", "hidden");
+  }
+
+  function showTableColNames() {
+    d3.select("table").style("visibility", "visible");
+  }
+
+  function populateTableRow(d_row) {
+    showTableColNames();
+
+
+    d3.selectAll("table")
+      .append("tr")
+      .attr("class", "row_data")
+      .selectAll("td")
+      .data(d_row)
+      .enter()
+      .append("td")
+      .attr("align", (d, i) => i == 0 ? "left" : "right")
+      .text(d => (d+'\u00A0\u00A0\u00A0\u00A0\u00A0'));
+
+  }
+
+  function make_hist(data, offs, label,clr){
+
+    let width = 150
+    let height = 150
+    // X axis: scale and draw:
+    var x = d3.scaleLinear()
+      .domain(d3.extent(data))  // can use this instead of 1000 to have the max of data: d3.max(data, function(d) { return +d.price })
+      .range([0, width]);
+    // append the svg object to the body of the page
+    var svg = d3.select('#histograms')
+      .append("svg")
+      .attr("width", 1.3*width )
+      .attr("height", 1.3*height )
+      .append("g")
+      .attr("transform", "translate("+offs+"," + 0+ ")")
+
+let diff = (d3.extent(data)[1]-d3.extent(data)[0])/2
+
+    // X axis: scale and draw:
+    var x = d3.scaleLinear()
+      .domain([d3.extent(data)[0]-diff, d3.extent(data)[1]+diff])     // can use this instead of 1000 to have the max of data: d3.max(data, function(d) { return +d.price })
+      .range([0, width]);
+    svg.append("g")
+      .attr("transform", "translate(0," + height + ")")
+      .call(d3.axisBottom(x).ticks(5));
+
+    // set the parameters for the histogram
+    var histogram = d3.histogram()
+      .value(function(d) { return d; })   // I need to give the vector of value
+      .domain(x.domain())  // then the domain of the graphic
+      .thresholds(x.ticks(10)); // then the numbers of bins
+
+    // And apply this function to data to get the bins
+    var bins = histogram(data);
+
+    // Y axis: scale and draw:
+    var y = d3.scaleLinear()
+      .range([height, 0]);
+    y.domain([0, d3.max(bins, function(d) { return d.length; })]);   // d3.hist has to be called before the Y axis obviously
+    svg.append("g")
+      .call(d3.axisLeft(y).ticks(5));
+
+    // append the bar rectangles to the svg element
+    svg.selectAll("rect")
+      .data(bins)
+      .enter()
+      .append("rect")
+      .attr("x", 1)
+      .attr("transform", function(d) { return "translate(" + x(d.x0) + "," + y(d.length) + ")"; })
+      .attr("width", function(d) { return x(d.x1) - x(d.x0) -1 ; })
+      .attr("height", function(d) { return height - y(d.length); })
+      .style("fill", "#69b3a2")
+
+    svg.append("text")
+      .attr("x", width/2)
+      .attr("y", height+25)
+      .attr("font-size",10)
+      .attr("dy", "0.5em")
+      .style("text-anchor", "middle")
+      .text("Feature Name Placeholder")
+
+
+
+
+
+
+
+   /* svg = d3.select('#histograms').append('svg')
+      .attr("width", width )
+      .attr("height", height )
+      .attr("transform", "translate("+(width+offs)+"," + height + ")").attr('overflow','visible')
+      .call(d3.axisBottom(x).ticks(7));
+
+    // set the parameters for the histogram
+    var histogram = d3.histogram()
+      .value(function(d) { return d })   // I need to give the vector of value
+      .domain(x.domain())  // then the domain of the graphic
+      .thresholds(x.ticks(20)); // then the numbers of bins
+
+    // And apply this function to data to get the bins
+    var bins = histogram(data);
+
+    // Y axis: scale and draw:
+    var y = d3.scaleLinear()
+      .range([height, 0]);
+    y.domain([0, d3.max(bins, function(d) { return d.length; })]);   // d3.hist has to be called before the Y axis obviously
+    svg.append("g")
+      .attr("transform", "translate("+(width+offs)+"," + 0 + ")")
+      .call(d3.axisLeft(y).ticks(5));
+
+    // append the bar rectangles to the svg element
+    svg.selectAll("rect2")
+      .attr("transform", "translate("+(width+offs)+"," + 0 + ")")
+      .data(bins)
+      .enter()
+      .append("rect")
+      .attr("x", 1)
+      .attr("transform", function(d) { return "translate(" +(width+offs+ x(d.x0)) + "," + y(d.length) + ")"; })
+      .attr("width", function(d) { return console.log(x(d.x1) - x(d.x0) -1);x(d.x1) - x(d.x0) -1 ; })
+      .attr("height", function(d) { return height - y(d.length); })
+      .attr('id','showstats')
+      .style("fill", clr)
+
+    svg.append("text")
+      //.attr("transform", "rotate(-90)")
+      .attr("y", height+20)
+      .attr("x", offs+width*1.5)
+      .attr("dy", "1em")
+      .style("text-anchor", "middle")
+      .text(label);*/
+
+  }
+  parseData('iris.csv', doStuff)
+
+</script>
+
+
+
+</body>
+</html>
